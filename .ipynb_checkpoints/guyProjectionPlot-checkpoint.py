@@ -43,8 +43,10 @@ def _data_loading(simulation_galaxy,snapshots,output_directory):
 
     ts = []
     try: 
-        snapshot_times = np.load(output_directory + galaxy + '/snapshot_times.npy')
-    except:
+        snapshot_times = np.load(output_directory + galaxy + '/snapshot_times.npy',allow_pickle = True).item()
+    except Exception as e:
+        print('when trying to load snapshot_times for galaxy: ' + galaxy)
+        print(f"An error occurred: {e}")
         snapshot_times = {}
     
     # loading simulation using yt
@@ -159,14 +161,14 @@ def _save(p,property,output_directory,galaxy,direction,width,redshift,snapshot_n
 
 def plot_projection(simulation_galaxy,snapshots,output_directory,directions,property, fraction_from_Rvir = 0.3):
     galaxy = simulation_galaxy.split("_res")[0]
-    
+    file_exists = 0
     # skipping prior calculations if possible
     try:
         L_disk_norms = np.load(output_directory + galaxy + "/L_disk_norms.npy",allow_pickle = True).item()
 
-        #skipping snapshots that were projected already
+        # skipping snapshots that were projected already
         try:
-            pixel_values = np.load(output_directory + galaxy + "/" + property + " pixel_values.npy",allow_pickle = True).item()
+            pixel_values = np.load(output_directory + galaxy + "/" + property + " pixel_values2.npy",allow_pickle = True).item()
             finished_snapshot_calcs = [int(num) for num in list(pixel_values.keys())]
             snapshots = [num for num in snapshots if num not in finished_snapshot_calcs]
             if len(snapshots) == 0:
@@ -175,6 +177,7 @@ def plot_projection(simulation_galaxy,snapshots,output_directory,directions,prop
                 return 0
         except:
             pixel_values = {}
+        pixel_values = {} # to delete later
         ts,galaxy = _data_loading(simulation_galaxy,snapshots,output_directory)
     except FileNotFoundError: 
         L_disk_norms,ts = angular_momentum(simulation_galaxy,snapshots,output_directory)
@@ -194,11 +197,13 @@ def plot_projection(simulation_galaxy,snapshots,output_directory,directions,prop
         snapshot_num = snapshots[i]
         redshift = round(ds.parameters['Redshift'],1)
         try:
-            pixel_values_dict = pixel_values[str(snapshot_num)]
-            finished_direction_calcs = [direction for direction in list(pixel_values_dict.keys())]
+            pixel_values_dict_tmp = pixel_values[str(snapshot_num)]
+            finished_direction_calcs = [direction for direction in list(pixel_values_dict_tmp.keys())]
             directions = [direction for direction in directions_copy if direction not in finished_direction_calcs]
+            file_exists = 1
         except:    
             pixel_values_dict = {}
+        pixel_values_dict = {}
         num_of_halos = 1
         if 'elvis' in galaxy:
             num_of_halos = 2
@@ -215,22 +220,28 @@ def plot_projection(simulation_galaxy,snapshots,output_directory,directions,prop
                 
                 # settings for ProjectionPlot
                 width = 2*fraction_from_Rvir*main_halo_virial_radius
-                cell_size = width/1000
+                cell_size = width/10000
                 num_cells = int(width/cell_size)
                 adj_width = cell_size*num_cells
                 fields=('gas', property)
                 center = main_halo_center
 
-                if direction == "EdgeOn":
+                if direction == "x":
                     arbitrary_vector = [1,1,3]
                     norm = np.cross(norm,arbitrary_vector) # projection on Edge
                     north_vector =  L_disk_norms[str(snapshot_num)][j]
+                elif direction == "y":
+                    arbitrary_vector = [1,1,3]
+                    norm = np.cross(norm,arbitrary_vector) # projection on Edge
+                    norm = np.cross(norm,L_disk_norms[str(snapshot_num)][j])
+                    north_vector =  L_disk_norms[str(snapshot_num)][j]
                 p = yt.ProjectionPlot(ds, norm, fields=fields,center = center, width= adj_width, weight_field = weight_field, buff_size = (num_cells+1,num_cells+1),north_vector = north_vector)
                 pixel_values_list.append(np.array(p.frb.data[('gas', property)]))
-            pixel_values_dict[direction] = pixel_values_list
-            
-        pixel_values[str(snapshot_num)] = pixel_values_dict
-        np.save(output_directory + galaxy + "/" + property + " pixel_values.npy",pixel_values)
+            if file_exists == 1:
+                pixel_values = np.load(output_directory + galaxy + "/" + property + " pixel_values2.npy",allow_pickle = True).item()
+            pixel_values[str(snapshot_num)][direction] = pixel_values_list
+            # pixel_values[str(snapshot_num)] = pixel_values_dict
+            np.save(output_directory + galaxy + "/" + property + " pixel_values2.npy",pixel_values)
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
     print("############################################# finished " + galaxy + " #############################################       " + str(timestamp))
     os.makedirs(output_directory + " finished with "  + galaxy + " " + property,exist_ok = True)
